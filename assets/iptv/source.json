@@ -1,0 +1,8 @@
+{
+  "upstream": "https://github.com/iptv-org/iptv",
+  "playlist": "https://iptv-org.github.io/iptv/index.category.m3u",
+  "fetchedAt": "2026-11-01T10:42:47.912Z",
+  "alternateStreams": 4816,
+  "localPlaylistFiles": 326,
+  "localAlternatesImported": true
+}
