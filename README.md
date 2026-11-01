@@ -17,6 +17,8 @@ channel, or recently opened Twitch player.
 - Discord activity and Last.fm/scrobbling integrations are disabled and absent
   from the settings interface.
 
+![YT.png](YT.png)
+
 ## Clean base
 
 This repository begins with a source-only snapshot. It contains no imported account
@@ -29,6 +31,8 @@ API key. Followed channels and profile lookup use an optional device-code connec
 with your own registered public Twitch application Client ID (no client secret).
 This API connection is separate from signing into Twitch's embedded chat. No shared
 credentials are included. Automatic signed updates are not configured for this base.
+
+![IPTV.png](IPTV.png)
 
 ## Build on Windows x64
 
@@ -60,6 +64,8 @@ npx --yes pnpm@10 build
 Portable catalog tests: `cargo test -p flametube-iptv --locked`.
 Linux and macOS platform source is retained, but this clean base is validated on
 Windows; packaging on other platforms requires the usual Tauri and libmpv dependencies.
+
+![Twitch.png](Twitch.png)
 
 ## Project map
 
