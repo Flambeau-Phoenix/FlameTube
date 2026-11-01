@@ -13,6 +13,8 @@ use libmpv2::mpv_node::MpvNode;
 use libmpv2::{Format, Mpv};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
+const HTTP_RECONNECT: &str = "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2,reconnect_max_retries=6,reconnect_delay_total_max=30,short_seek_size=1";
+
 mod video;
 pub use video::{GlDisplay, Thumbnail, VideoRenderer};
 
@@ -354,7 +356,7 @@ fn new_mpv(cache_dir: &str) -> Result<Mpv, Error> {
     // answers with a 206.
     mpv.set_property(
             "stream-lavf-o",
-            "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2,reconnect_max_retries=6,reconnect_delay_total_max=30,short_seek_size=1",
+            HTTP_RECONNECT,
         )?;
     request_mpv_log(&mpv);
     Ok(mpv)
@@ -472,6 +474,15 @@ impl Player {
         gain_db: Option<f64>,
         start: Option<f64>,
     ) -> Result<(), Error> {
+        self.load_transport(url, headers, gain_db, start, false)
+    }
+
+    /// HLS playlists must reach EOF normally; file-download reconnect options can loop forever.
+    pub fn load_live(&self, url: &str, headers: &HashMap<String, String>) -> Result<(), Error> {
+        self.load_transport(url, headers, None, None, true)
+    }
+
+    fn load_transport(&self, url: &str, headers: &HashMap<String, String>, gain_db: Option<f64>, start: Option<f64>, live: bool) -> Result<(), Error> {
         // Whatever was queued up on the other deck is not what the user asked for. Cut a fade
         // in progress too: a skip during the last seconds of a track should not leave the old one
         // still fading under the new one.
@@ -494,6 +505,7 @@ impl Player {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
+        self.mpv().set_property("stream-lavf-o", if live { "" } else { HTTP_RECONNECT })?;
         self.apply_headers(headers)?;
         self.set_gain(gain_db)?;
         let args = loadfile_args(url, start, loadfile_has_index(self.mpv()));
@@ -1547,6 +1559,18 @@ mod tests {
     use super::{
         af_chain, is_ao_init_failed, loadfile_args, loop_wrapped, perceptual_to_mpv, quoted,
     };
+
+    #[test]
+    fn live_load_clears_file_retries_and_normal_load_restores_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = super::Player::new(dir.path().to_str().unwrap()).unwrap();
+        p.mpv().set_property("ao", "null").unwrap();
+        p.load_live("av://lavfi:anullsrc", &Default::default()).unwrap();
+        assert_eq!(p.mpv().get_property::<String>("stream-lavf-o").unwrap(), "");
+        p.load("av://lavfi:anullsrc", &Default::default(), None, None).unwrap();
+        assert!(p.mpv().get_property::<String>("stream-lavf-o").unwrap().contains("reconnect=1"));
+        p.stop().unwrap();
+    }
 
     #[test]
     fn repeat_one_wrap_is_end_to_start_only() {

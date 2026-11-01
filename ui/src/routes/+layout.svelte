@@ -57,7 +57,8 @@
 	import { isLocalId } from '$lib/api';
 	import { video } from '$lib/video.svelte';
 	import { watch } from '$lib/watch-hole.svelte';
-	import { twitchSession } from '$lib/twitch.svelte';
+	import { twitchSession, initTwitch } from '$lib/twitch.svelte';
+	import TwitchAuthDialog from '$lib/components/TwitchAuthDialog.svelte';
 	// Resuming native playback makes it the Now Playing destination again.
 	$effect(() => { if (!playback.paused) twitchSession.returnPending = false; });
 	import { initWin, windowCorners } from '$lib/win.svelte';
@@ -160,6 +161,8 @@
 
 	// Apply the saved accent color before the first paint (ssr=false → nothing renders until now).
 	if (browser) initTheme();
+	// Initialize Twitch followed channels and session
+	if (browser) initTwitch();
 	// The custom app icon (#173) is a file on disk, so the titlebar has to ask Rust for it.
 	if (browser) loadAppIcon();
 
@@ -323,6 +326,7 @@
 	<ListenTogether />
 	<LinkDialog />
 	<ImportDialog />
+	<TwitchAuthDialog />
 
 	<!-- The two notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to
 	     <body>, so a z-50 banner loses the tie on DOM order and hides behind an open modal. The update

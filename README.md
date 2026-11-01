@@ -8,10 +8,11 @@ channel, or recently opened Twitch player.
 
 - YouTube browsing, search, and native video playback with accessible quality controls.
 - YouTube Music browsing and playback through the existing music library interface.
-- Live TV with English-language filtering, US-first sorting, categories, search,
+- Live TV in a single-column channel list, with English-language filtering, US-first sorting, categories, search,
   favorites, and alternate streams from the attributed iptv-org catalog.
 - Twitch channels, past broadcasts, and clips through Twitch's official player;
-  local favorite channels and optional chat. Leaving Twitch unloads its player;
+  followed live channels through optional Twitch account connection, broadcaster
+  profiles, local favorite channels, and adjustable chat. Leaving Twitch unloads its player;
   Now Playing reopens the selected channel or link.
 - Discord activity and Last.fm/scrobbling integrations are disabled and absent
   from the settings interface.
@@ -24,7 +25,9 @@ databases, build outputs, or previous development Git history. Runtime data is c
 locally. The app identifier is `app.flametube.desktop`, separate from Limusic's profile.
 
 YouTube sign-in is optional. Twitch channel/link playback does not require a bundled
-API key; account-dependent Twitch features remain controlled by Twitch. No shared
+API key. Followed channels and profile lookup use an optional device-code connection
+with your own registered public Twitch application Client ID (no client secret).
+This API connection is separate from signing into Twitch's embedded chat. No shared
 credentials are included. Automatic signed updates are not configured for this base.
 
 ## Build on Windows x64

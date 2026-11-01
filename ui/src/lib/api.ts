@@ -1490,3 +1490,59 @@ export const ytSubscribe = (channelId: string, subscribed: boolean) =>
 	invoke<void>('yt_subscribe', { channelId, subscribed });
 export const ytWatchLater = (videoId: string, saved: boolean) =>
 	invoke<void>('yt_watch_later', { videoId, saved });
+
+/** Twitch account and followed channels integration */
+export interface TwitchStatus {
+	clientIdSet: boolean;
+	clientId?: string | null;
+	signedIn: boolean;
+	login?: string | null;
+}
+
+export interface TwitchDeviceCode {
+	generation: number;
+	userCode: string;
+	verificationUri: string;
+	deviceCode: string;
+	expiresIn: number;
+	interval: number;
+}
+
+export interface TwitchLiveChannel {
+	id: string;
+	login: string;
+	name: string;
+	title: string;
+	game: string;
+	viewers: number;
+	thumbnail: string;
+	startedAt: string;
+}
+
+export const twitchStatus = () => invoke<TwitchStatus>('twitch_status');
+export const twitchSetClientId = (clientId: string) =>
+	invoke<TwitchStatus>('twitch_set_client_id', { clientId });
+export const twitchSignOut = () => invoke<void>('twitch_sign_out');
+export const twitchDeviceCancel = () => invoke<void>('twitch_device_cancel');
+export const twitchDeviceStart = () => invoke<TwitchDeviceCode>('twitch_device_start');
+export const twitchDeviceWait = (deviceCode: string, interval: number, expiresIn: number, expectedGeneration: number) =>
+	invoke<string>('twitch_device_wait', { deviceCode, interval, expiresIn, expectedGeneration });
+export const twitchFollowedLive = () => invoke<TwitchLiveChannel[]>('twitch_followed_live');
+
+export interface TwitchBroadcasterProfile {
+	id: string;
+	login: string;
+	displayName: string;
+	description: string;
+	profileImageUrl: string;
+	broadcasterType: string;
+	viewCount: number;
+	gameName: string;
+	title: string;
+	isLive: boolean;
+	viewerCount: number;
+	startedAt: string;
+}
+
+export const twitchBroadcasterProfile = (login: string) =>
+	invoke<TwitchBroadcasterProfile>('twitch_broadcaster_profile', { login });

@@ -21,10 +21,22 @@ clean profile uses Tauri's HTTPS custom-protocol scheme. The remote frames recei
 no Tauri capability grant; native commands remain restricted to the local UI.
 Avoid overlays over the Twitch player and retain its minimum 400 × 300 size.
 
-Discovery, followed-channel synchronization, and app-owned Twitch authentication
-are future work. The Browse button opens Twitch's directory in the user's browser.
-Adding Helix discovery requires a registered Twitch app and an appropriate token
-flow; never distribute a client secret in desktop source or binaries.
+Followed live channels and broadcaster profiles use Twitch Helix through the Rust
+host. Register a **public** application at the Twitch developer console and enter
+its Client ID in Connect Twitch. Authorize the displayed device code on Twitch's
+activation page. Only `user:read:follows` is requested. No client secret is needed.
+Tokens are stored in the local app database, never embedded into the source or sent
+to frontend settings. Treat that database and profile backups as private. Sign-out
+removes the local API session; it does not sign out Twitch's separate browser/chat cookies.
+
+Session commits reject cancelled generations; refresh is serialized and tokens are
+validated on startup and hourly while the app runs. Channel cards ignore stale
+profile responses when switching targets. Chat supports theme, width, docking, and
+a narrowly validated Chatterino launch link, if Chatterino is installed.
+
+The Browse button opens Twitch's directory in the browser. API connection and
+embedded chat authentication remain separate flows. End-to-end device authorization
+requires the user's Twitch application and account and is not automated by the test suite.
 
 Official references:
 

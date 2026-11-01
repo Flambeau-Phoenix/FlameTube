@@ -20,6 +20,8 @@
 	import { thumb } from '$lib/thumb';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 	import { t } from '$lib/i18n.svelte';
+	import TwitchIcon from '$lib/components/TwitchIcon.svelte';
+	import { twitchSession } from '$lib/twitch.svelte';
 
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
@@ -259,6 +261,23 @@
 				</Button>
 			{/if}
 		{/if}
+
+		<div class="my-2.5 h-px bg-border/60"></div>
+		<button
+			type="button"
+			class="flex w-full items-center justify-between rounded-lg p-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+			onclick={() => { menuOpen = false; twitchSession.authOpen = true; }}
+		>
+			<div class="flex items-center gap-2">
+				<TwitchIcon class="h-4 w-4 text-[#9146FF]" />
+				<span class="font-medium text-foreground">Twitch</span>
+			</div>
+			{#if twitchSession.status?.signedIn}
+				<span class="text-[11px] font-semibold text-emerald-500">@{twitchSession.status.login}</span>
+			{:else}
+				<span class="text-[11px] text-[#9146FF] font-medium">Connect ↗</span>
+			{/if}
+		</button>
 	</div>
 {/if}
 

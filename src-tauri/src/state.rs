@@ -2299,11 +2299,16 @@ impl AppState {
             .filter(|(vid, _)| *vid == item.video_id && !crate::iptv::is_live(vid))
             .map(|(_, pos)| pos);
         let stream_url = mpv_stream_url(&data);
-        if let Err(e) =
-            self.player.load(&stream_url, &data.headers, self.track_gain(data.loudness_db), seek)
         {
+        let loaded = if crate::iptv::is_live(&item.video_id) {
+            self.player.load_live(&stream_url, &data.headers)
+        } else {
+            self.player.load(&stream_url, &data.headers, self.track_gain(data.loudness_db), seek)
+        };
+        if let Err(e) = loaded {
             self.emit_error(&item.video_id, &e.to_string());
             return false;
+        }
         }
         // Listen Together host: announce the track before `play`, whose pause-flag change is the
         // room's Play. Sent after, a skip while paused reaches guests as "play" on the old track

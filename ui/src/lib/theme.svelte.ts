@@ -26,10 +26,11 @@ import {
 } from './api';
 
 export type ThemeId =
+	| 'caffeine'
+	| 'coffee'
 	| 'default'
 	| 'catppuccin'
 	| 'tokyonight'
-	| 'caffeine'
 	| 'neon'
 	| 'breeze'
 	| 'amoled';
@@ -38,10 +39,10 @@ export type ThemeId =
 type Theme = { id: ThemeId; label: string; color: string };
 
 export const THEMES: Theme[] = [
+	{ id: 'caffeine', label: 'Coffee', color: 'oklch(0.4341 0.0392 41.9938)' },
 	{ id: 'default', label: 'Default', color: 'oklch(0.514 0.222 16.935)' },
 	{ id: 'catppuccin', label: 'Catppuccin', color: 'oklch(0.5547 0.2503 297.0156)' },
 	{ id: 'tokyonight', label: 'Tokyo Night', color: 'oklch(0.3593 0.0513 273.1802)' },
-	{ id: 'caffeine', label: 'Caffeine', color: 'oklch(0.4341 0.0392 41.9938)' },
 	{ id: 'neon', label: 'Neon', color: 'oklch(0.6726 0.2904 341.4084)' },
 	{ id: 'breeze', label: 'Breeze', color: 'oklch(0.7227 0.1920 149.5793)' },
 	{ id: 'amoled', label: 'AMOLED', color: 'oklch(0 0 0)' }
@@ -83,7 +84,7 @@ export type Custom = {
 const KEY = 'primary-theme';
 const CUSTOM_KEY = 'custom-theme';
 const APPEARANCE_KEY = 'appearance';
-const PALETTE_CLASSES = THEMES.map((t) => `theme-${t.id}`);
+const PALETTE_CLASSES = [...THEMES.map((t) => `theme-${t.id}`), 'theme-coffee'];
 /** Set on <html> while the artwork tint is live; the fill rules in layout.css hang off it. */
 const TINT_CLASS = 'art-tint';
 const MATUGEN_STYLE_ID = 'limusic-matugen';
@@ -93,8 +94,8 @@ const CUSTOM_VARS = ['--hue', '--radius', '--font-sans', '--font-heading'];
 const ON_DARK = 'oklch(0.985 0 0)';
 const ON_LIGHT = 'oklch(0.205 0 0)';
 
-/** Reactive current selection, so the picker reflects it. */
-export const theme = $state<{ id: ThemeId }>({ id: 'default' });
+/** Reactive current selection, so the picker reflects it. Defaults to Coffee. */
+export const theme = $state<{ id: ThemeId }>({ id: 'caffeine' });
 export const custom = $state<Custom>({
 	accent: null,
 	hue: null,
@@ -235,7 +236,8 @@ function apply(): void {
 }
 
 export function applyTheme(id: ThemeId): void {
-	theme.id = THEMES.some((t) => t.id === id) ? id : THEMES[0].id;
+	const normalized = id === 'coffee' ? 'caffeine' : id;
+	theme.id = THEMES.some((t) => t.id === normalized) ? normalized : 'caffeine';
 	apply();
 	localStorage.setItem(KEY, theme.id);
 }
@@ -495,10 +497,11 @@ export function syncMatugen(): Promise<void> {
 	return matugenQueue;
 }
 
-/** Apply the stored theme + customization on startup (defaults to the default palette, no overrides). */
+/** Apply the stored theme + customization on startup (defaults to Coffee palette, no overrides). */
 export function initTheme(): void {
 	const stored = localStorage.getItem(KEY);
-	theme.id = THEMES.some((t) => t.id === stored) ? (stored as ThemeId) : 'default';
+	const normalized = stored === 'coffee' ? 'caffeine' : stored;
+	theme.id = normalized && THEMES.some((t) => t.id === normalized) ? (normalized as ThemeId) : 'caffeine';
 	try {
 		const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '{}');
 		// Only keys we know about, only the shape we expect: a hand-edited or older localStorage

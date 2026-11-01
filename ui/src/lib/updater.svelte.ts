@@ -30,7 +30,6 @@ let pending: Update | null = null;
 const SIGNED_UPDATES_ENABLED = false;
 
 async function look(): Promise<boolean> {
-	// Configure project-owned signing and release endpoints before enabling updates.
 	if (!SIGNED_UPDATES_ENABLED) return false;
 	let u: Update | null;
 	const beta = (await getSettings()).update_channel === 'beta';
@@ -134,7 +133,7 @@ export async function recheckForUpdates() {
 /** From Settings: return the outcome so the modal can show it inline (a toast renders behind the
  *  dialog). `error` picks the Alert variant. */
 export async function checkForUpdatesInteractive(): Promise<{ message: string; error: boolean }> {
-	if (!SIGNED_UPDATES_ENABLED) return { message: 'Automatic updates are not configured for this base. Check the FlameTube repository for releases.', error: false };
+	if (!SIGNED_UPDATES_ENABLED) return { message: 'Automatic updates are not configured. Check the FlameTube repository for releases.', error: false };
 	updateState.checking = true;
 	try {
 		if (await look()) return { message: availableMessage(updateState.available!), error: false };

@@ -1993,7 +1993,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flametube-iptv"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3003,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "innertube"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -3422,7 +3422,7 @@ dependencies = [
 
 [[package]]
 name = "limusic-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "any_ascii",
  "anyhow",
@@ -3748,7 +3748,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4707,7 +4707,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "player"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libc",
  "libmpv2",
@@ -6270,7 +6270,7 @@ dependencies = [
 
 [[package]]
 name = "sync-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "listen-protocol",

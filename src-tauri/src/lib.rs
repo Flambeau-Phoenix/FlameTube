@@ -38,6 +38,7 @@ mod stats;
 #[cfg(target_os = "windows")]
 mod taskbar;
 mod tray;
+mod twitch;
 mod video_commands;
 mod video_play;
 mod videoproxy;
@@ -1258,6 +1259,14 @@ pub fn run() {
             commands::set_lyrics_offset,
             commands::lyrics_providers,
             commands::lastfm_preview,
+            twitch::twitch_status,
+            twitch::twitch_set_client_id,
+            twitch::twitch_sign_out,
+            twitch::twitch_device_start,
+            twitch::twitch_device_wait,
+            twitch::twitch_device_cancel,
+            twitch::twitch_followed_live,
+            twitch::twitch_broadcaster_profile,
             commands::listenbrainz_connect,
             commands::listenbrainz_disconnect,
             commands::listenbrainz_status,

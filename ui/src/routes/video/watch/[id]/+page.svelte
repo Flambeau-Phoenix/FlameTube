@@ -31,6 +31,8 @@
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import { openFeedItem } from '$lib/video-nav';
 	import { t } from '$lib/i18n.svelte';
+	import TwitchFollowedBar from '$lib/components/TwitchFollowedBar.svelte';
+	import { twitchSession } from '$lib/twitch.svelte';
 
 	import { page as route } from '$app/state';
 
@@ -290,6 +292,13 @@
 	{#if error && !page}
 		<ErrorState message={error} onRetry={load} />
 	{:else if page}
+		<!-- Followed live channels horizontal bar above the video -->
+		{#if twitchSession.status?.signedIn && twitchSession.liveChannels.length > 0}
+			<div class="mb-3">
+				<TwitchFollowedBar navigate={true} compact={true} />
+			</div>
+		{/if}
+
 		<!-- The picture, full width, its height capped so the page below it stays on screen. -->
 		<div
 			class="relative w-full overflow-hidden rounded-2xl {audioMode.on ? 'bg-black' : 'bg-transparent'}"

@@ -943,7 +943,13 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
 fn web_url(url: &str) -> Result<tauri::Url, String> {
     tauri::Url::parse(url)
         .ok()
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .filter(|u| matches!(u.scheme(), "http" | "https") || (
+            u.scheme() == "chatterino" && u.host_str() == Some("twitch") &&
+            u.username().is_empty() && u.password().is_none() && u.port().is_none() &&
+            u.query().is_none() && u.fragment().is_none() &&
+            !u.path().trim_start_matches('/').is_empty() && u.path().len() <= 26 &&
+            u.path().trim_start_matches('/').chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        ))
         .ok_or_else(|| "only http(s) links".to_string())
 }
 

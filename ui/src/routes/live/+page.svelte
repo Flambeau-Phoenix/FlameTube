@@ -109,17 +109,33 @@
 	{#if warning || error}<p class="mb-4 rounded-lg border p-3 text-sm" role="status">{warning || error}</p>{/if}
 	{#if loading}<p role="status">Loading channels…</p>{:else if !filtered.length}<p class="py-12 text-center text-muted-foreground">No channels match these filters. Try another category or turn off English only to include channels with unknown language.</p>
 	{:else}
-		<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+		<ul aria-label="Live TV channels" class="divide-y divide-border overflow-hidden rounded-xl border bg-card">
 			{#each filtered.slice(0, limit) as channel (channel.id)}
-				<article class="flex items-center gap-3 rounded-xl border bg-card p-3 {selected?.id === channel.id ? 'ring-2 ring-primary' : ''}">
-					<button class="flex min-w-0 flex-1 items-center gap-3 text-left" onclick={() => play(channel)}>
-						<div class="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg bg-white/90 p-1 text-black">{#if channel.logo}<img class="max-h-full max-w-full object-contain" src={channel.logo} alt="" loading="lazy" onerror={e => (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'} />{:else}<span class="text-xs">LIVE TV</span>{/if}</div>
-						<div class="min-w-0"><h3 class="line-clamp-2 text-sm font-semibold">{channel.name}</h3><p class="mt-1 truncate text-xs text-muted-foreground">{channel.categories.join(' · ') || 'Uncategorized'}</p><p class="text-xs text-muted-foreground">{channel.country ? countryLabel(channel.country) : 'Unknown origin'} · {channel.streams.length} source{channel.streams.length === 1 ? '' : 's'}</p><p class="mt-1 text-[11px] text-muted-foreground" title={health[channel.id] ? new Date(health[channel.id].at).toLocaleString() : 'No local playback result'}>{health[channel.id] ? `${health[channel.id].ok ? 'Played here' : 'Last attempt failed'} · ${new Date(health[channel.id].at).toLocaleDateString()}` : 'Untested here'}</p></div>
+				<li class="flex items-center border-l-2 pr-2 transition-colors {selected?.id === channel.id ? 'border-l-primary bg-primary/5' : 'border-l-transparent hover:bg-foreground/5'}">
+					<button
+						class="grid min-w-0 flex-1 grid-cols-[3rem_minmax(0,1fr)] items-center gap-3 px-3 py-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary md:grid-cols-[3rem_minmax(0,1fr)_9rem] xl:grid-cols-[3rem_minmax(0,1fr)_10rem_9rem]"
+						aria-label={`Play ${channel.name}`}
+						aria-pressed={selected?.id === channel.id}
+						onclick={() => play(channel)}
+					>
+						<div class="flex h-10 w-12 shrink-0 items-center justify-center rounded-md bg-white/90 p-1 text-black">
+							{#if channel.logo}<img class="max-h-full max-w-full object-contain" src={channel.logo} alt="" loading="lazy" onerror={e => (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'} />{:else}<span class="text-[10px]">LIVE TV</span>{/if}
+						</div>
+						<div class="min-w-0">
+							<h3 class="truncate text-sm font-semibold">{channel.name}</h3>
+							<p class="mt-0.5 truncate text-xs text-muted-foreground">{channel.categories.join(' · ') || 'Uncategorized'}</p>
+							<p class="mt-0.5 text-xs text-muted-foreground md:hidden">{channel.country ? countryLabel(channel.country) : 'Unknown origin'} · {channel.streams.length} source{channel.streams.length === 1 ? '' : 's'}</p>
+						</div>
+						<p class="hidden truncate text-xs text-muted-foreground xl:block">{channel.country ? countryLabel(channel.country) : 'Unknown origin'}</p>
+						<div class="hidden min-w-0 text-xs text-muted-foreground md:block">
+							<p>{channel.streams.length} source{channel.streams.length === 1 ? '' : 's'}<span class="xl:hidden"> · {channel.country || 'Unknown origin'}</span></p>
+							<p class="mt-0.5 truncate text-[11px]" title={health[channel.id] ? new Date(health[channel.id].at).toLocaleString() : 'No local playback result'}>{health[channel.id] ? `${health[channel.id].ok ? 'Played here' : 'Last attempt failed'} · ${new Date(health[channel.id].at).toLocaleDateString()}` : 'Untested here'}</p>
+						</div>
 					</button>
-					<button class="self-start p-1" aria-label={`${favorites.includes(channel.id) ? 'Remove' : 'Save'} ${channel.name} favorite`} aria-pressed={favorites.includes(channel.id)} onclick={() => favorite(channel.id)}>{favorites.includes(channel.id) ? '★' : '☆'}</button>
-				</article>
+					<button class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg hover:bg-foreground/10 focus-visible:outline-2 focus-visible:outline-primary" aria-label={`${favorites.includes(channel.id) ? 'Remove' : 'Save'} ${channel.name} favorite`} aria-pressed={favorites.includes(channel.id)} onclick={() => favorite(channel.id)}>{favorites.includes(channel.id) ? '★' : '☆'}</button>
+				</li>
 			{/each}
-		</div>
+		</ul>
 		{#if filtered.length > limit}<button class="mx-auto mt-5 block rounded-full border px-5 py-2" onclick={() => limit += 120}>Show more channels</button>{/if}
 	{/if}
 	<p class="mt-6 text-xs text-muted-foreground">Channel directory: <button class="underline" onclick={() => api.openExternal('https://github.com/iptv-org/iptv')}>iptv-org</button>. Availability depends on the broadcaster and your region.</p>
