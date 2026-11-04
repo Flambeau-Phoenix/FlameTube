@@ -9,8 +9,6 @@
 	import TwitchIcon from '$lib/components/TwitchIcon.svelte';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
-		PlayIcon,
-		UserIcon,
 		ArrowRight01Icon,
 		ArrowLeft01Icon
 	} from '@hugeicons/core-free-icons';
@@ -43,6 +41,25 @@
 			void refreshFollowedLive();
 		}
 		updateScrollState();
+
+		const ro = new ResizeObserver(() => updateScrollState());
+		if (scrollContainer) ro.observe(scrollContainer);
+		window.addEventListener('resize', updateScrollState);
+		return () => {
+			ro.disconnect();
+			window.removeEventListener('resize', updateScrollState);
+		};
+	});
+
+	// Recompute scroll state whenever the live channels list or loading state changes
+	$effect(() => {
+		void channels.length;
+		void loading;
+		void signedIn;
+		if (!scrollContainer) return;
+		updateScrollState();
+		const frame = requestAnimationFrame(() => updateScrollState());
+		return () => cancelAnimationFrame(frame);
 	});
 
 	function formatViewers(count: number): string {
@@ -54,13 +71,25 @@
 	function updateScrollState() {
 		if (!scrollContainer) return;
 		const { scrollLeft, scrollWidth, clientWidth } = scrollContainer;
-		canScrollLeft = scrollLeft > 8;
-		canScrollRight = scrollLeft + clientWidth < scrollWidth - 8;
+		canScrollLeft = scrollLeft > 4;
+		canScrollRight = scrollLeft + clientWidth < scrollWidth - 4;
 	}
 
 	function scrollBy(delta: number) {
 		if (!scrollContainer) return;
 		scrollContainer.scrollBy({ left: delta, behavior: 'smooth' });
+		setTimeout(updateScrollState, 180);
+		setTimeout(updateScrollState, 360);
+	}
+
+	function handleWheel(e: WheelEvent) {
+		if (!scrollContainer) return;
+		if (scrollContainer.scrollWidth <= scrollContainer.clientWidth) return;
+		if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+			e.preventDefault();
+			scrollContainer.scrollLeft += e.deltaY;
+			updateScrollState();
+		}
 	}
 
 	function handleChannelClick(login: string) {
@@ -68,20 +97,20 @@
 	}
 </script>
 
-<div class="group/bar relative flex w-full items-center gap-2 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md p-1.5 shadow-xs transition-colors {cls}">
-	<!-- Brand label + Quick status -->
+<div class="group/bar relative flex w-full items-center gap-2 rounded-xl border border-border/80 bg-card/80 backdrop-blur-md p-1.5 shadow-xs transition-colors {cls}">
+	<!-- Brand label + Live Now status -->
 	<div class="flex shrink-0 items-center gap-1.5 pl-1.5 pr-2 border-r border-border/60">
 		<button
 			type="button"
-			class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-foreground/10"
-			onclick={() => twitchSession.authOpen = true}
+			class="flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-foreground/10"
+			onclick={() => (twitchSession.authOpen = true)}
 			title={signedIn ? `Twitch: @${status?.login} (Click to manage)` : 'Connect Twitch account'}
 		>
 			<TwitchIcon class="h-4 w-4 text-[#9146FF]" />
-			<span class="hidden sm:inline">Twitch</span>
-			{#if signedIn && channels.length > 0}
-				<span class="flex items-center gap-1 rounded-full bg-red-500/15 px-1.5 py-0.2 text-[10px] font-bold text-red-500">
-					<span class="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse"></span>
+			<span class="font-bold tracking-tight">Live Now</span>
+			{#if signedIn}
+				<span class="flex items-center gap-1 rounded-full {channels.length > 0 ? 'bg-red-500/15 text-red-500' : 'bg-foreground/10 text-muted-foreground'} px-1.5 py-0.5 text-[10px] font-bold">
+					<span class="h-1.5 w-1.5 rounded-full {channels.length > 0 ? 'bg-red-500 animate-pulse' : 'bg-muted-foreground/50'}"></span>
 					<span>{channels.length}</span>
 				</span>
 			{/if}
@@ -89,22 +118,24 @@
 
 		<button
 			type="button"
-			class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+			class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
 			disabled={loading}
 			onclick={() => void refreshFollowedLive(true)}
-			title="Refresh followed channels"
+			title="Refresh followed live channels"
 		>
 			<span class="text-xs transition-transform duration-300 {loading ? 'animate-spin' : ''}">↻</span>
 		</button>
 	</div>
 
-	<!-- Scroll Left Arrow -->
-	{#if canScrollLeft}
+	<!-- Scroll Left Button (Always visible when signed in so users can reliably scroll left) -->
+	{#if signedIn}
 		<button
 			type="button"
-			class="absolute left-28 z-10 hidden md:flex h-7 w-7 items-center justify-center rounded-full bg-background/90 border border-border shadow-md text-foreground transition-opacity hover:bg-accent"
-			onclick={() => scrollBy(-240)}
-			aria-label="Scroll left"
+			class="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border/80 bg-background/90 text-foreground shadow-xs transition-all hover:bg-accent disabled:cursor-default disabled:opacity-30"
+			disabled={!canScrollLeft}
+			onclick={() => scrollBy(-260)}
+			aria-label="Scroll live channels left"
+			title="Scroll left"
 		>
 			<HugeiconsIcon icon={ArrowLeft01Icon} class="h-3.5 w-3.5" />
 		</button>
@@ -114,7 +145,8 @@
 	<div
 		bind:this={scrollContainer}
 		onscroll={updateScrollState}
-		class="flex flex-1 items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5"
+		onwheel={handleWheel}
+		class="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5"
 	>
 		{#if !signedIn}
 			<!-- Signed-out banner inside the horizontal line -->
@@ -122,8 +154,8 @@
 				<span class="text-muted-foreground">See who you follow on Twitch live here:</span>
 				<button
 					type="button"
-					class="inline-flex items-center gap-1.5 rounded-full bg-[#9146FF] px-3 py-1 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#772CE8]"
-					onclick={() => twitchSession.authOpen = true}
+					class="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[#9146FF] px-3 py-1 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#772CE8]"
+					onclick={() => (twitchSession.authOpen = true)}
 				>
 					<TwitchIcon class="h-3.5 w-3.5" />
 					<span>Sign in with Twitch</span>
@@ -142,6 +174,18 @@
 				</div>
 			{/each}
 
+		{:else if error && channels.length === 0}
+			<div class="flex items-center gap-2 py-1 px-2 text-xs text-destructive">
+				<span>Could not load live channels: {error}</span>
+				<button
+					type="button"
+					class="cursor-pointer text-xs text-[#9146FF] hover:underline font-medium ml-1"
+					onclick={() => void refreshFollowedLive(true)}
+				>
+					Retry
+				</button>
+			</div>
+
 		{:else if channels.length === 0}
 			<!-- No channels currently live -->
 			<div class="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
@@ -149,7 +193,7 @@
 				<span>No followed channels are live right now</span>
 				<button
 					type="button"
-					class="text-xs text-[#9146FF] hover:underline font-medium ml-1"
+					class="cursor-pointer text-xs text-[#9146FF] hover:underline font-medium ml-1"
 					onclick={() => void refreshFollowedLive(true)}
 				>
 					Check again
@@ -178,7 +222,7 @@
 					</div>
 
 					<!-- Streamer details -->
-					<div class="min-w-0 max-w-[130px] {compact ? 'max-w-[100px]' : 'max-w-[140px]'} leading-tight">
+					<div class="min-w-0 {compact ? 'max-w-[110px]' : 'max-w-[145px]'} leading-tight">
 						<div class="flex items-center gap-1">
 							<span class="truncate text-xs font-semibold text-foreground group-hover/channel:text-primary transition-colors">
 								{channel.name}
@@ -199,13 +243,15 @@
 		{/if}
 	</div>
 
-	<!-- Scroll Right Arrow -->
-	{#if canScrollRight}
+	<!-- Scroll Right Button (Always visible when signed in so users can reliably scroll right) -->
+	{#if signedIn}
 		<button
 			type="button"
-			class="absolute right-2 z-10 hidden md:flex h-7 w-7 items-center justify-center rounded-full bg-background/90 border border-border shadow-md text-foreground transition-opacity hover:bg-accent"
-			onclick={() => scrollBy(240)}
-			aria-label="Scroll right"
+			class="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border/80 bg-background/90 text-foreground shadow-xs transition-all hover:bg-accent disabled:cursor-default disabled:opacity-30"
+			disabled={!canScrollRight}
+			onclick={() => scrollBy(260)}
+			aria-label="Scroll live channels right"
+			title="Scroll right"
 		>
 			<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
 		</button>

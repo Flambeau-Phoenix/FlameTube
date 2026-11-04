@@ -24,6 +24,13 @@
 	import { audioMode, setAudioMode } from '$lib/video-mode.svelte';
 	import { setWatchHole, watch, clearWatchHole } from '$lib/watch-hole.svelte';
 	import { getCached, putCached } from '$lib/pagecache';
+	import {
+		filterRelatedItems,
+		isVideoWatched,
+		markVideoWatched,
+		seedWatchedVideos,
+		separateShortsAndVideos
+	} from '$lib/video-home';
 	import VideoCardView from '$lib/components/VideoCard.svelte';
 	import VideoComments from '$lib/components/VideoComments.svelte';
 	import VideoControls from '$lib/components/VideoControls.svelte';
@@ -43,6 +50,7 @@
 	let related = $state<FeedItem[]>([]);
 	let relatedMore = $state<string | null>(null);
 	let moreLoading = $state(false);
+	let showRelatedShorts = $state(false);
 	let descOpen = $state(false);
 	let commentsOpen = $state(false);
 	let saved = $state(false);
@@ -58,6 +66,30 @@
 	let startedKey: string | null = null;
 	let fallbackBox = $state<HTMLElement | null>(null);
 	let observedPlaying = $state(false);
+	let clickTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Separate related items into full-length videos and Shorts so Shorts never clutter Up Next.
+	const separatedRelated = $derived.by(() => {
+		const cleaned = filterRelatedItems(related, videoId);
+		const split = separateShortsAndVideos([{ items: cleaned }]);
+		const fullItems = split.videoSections.flatMap((s) => s.items);
+		const shortItems = split.shorts;
+		return { fullItems, shortItems };
+	});
+
+	// Choose an unwatched Up Next target: if YouTube's default autoplay item was already watched,
+	// pick the first unwatched full-length related video instead.
+	const effectiveAutoplay = $derived.by(() => {
+		const candidate = page?.autoplay;
+		if (candidate && candidate.videoId !== videoId && !isVideoWatched(candidate.videoId)) {
+			return candidate;
+		}
+		const fallback = separatedRelated.fullItems.find(
+			(item): item is Extract<FeedItem, { kind: 'video' }> =>
+				item.kind === 'video' && item.videoId !== videoId && !isVideoWatched(item.videoId)
+		);
+		return fallback ?? candidate ?? null;
+	});
 
 	async function load() {
 		const mine = ++loadSeq;
@@ -98,6 +130,7 @@
 	/** Queue this video (and its playlist, when it was opened from one) and start it. */
 	async function play() {
 		if (!page || page.videoId !== videoId) return;
+		if (typeof markVideoWatched === 'function') markVideoWatched(videoId);
 		const items = page.playlist?.items?.length ? page.playlist.items : [cardOf(page)];
 		try {
 			await api.ytPlay(videoId, items, page.playlist?.playlistId ?? null);
@@ -127,13 +160,49 @@
 		moreLoading = true;
 		try {
 			const feed = await api.ytMore('next', relatedMore);
-			related = [...related, ...feed.sections.flatMap((s) => s.items)];
+			const incoming = feed.sections.flatMap((s) => s.items);
+			const existingIds = new Set(
+				related
+					.filter((i): i is Extract<FeedItem, { kind: 'video' }> => i.kind === 'video')
+					.map((i) => i.videoId)
+			);
+			const filtered = filterRelatedItems(incoming, videoId).filter(
+				(i) => i.kind !== 'video' || !existingIds.has(i.videoId)
+			);
+			related = [...related, ...filtered];
 			relatedMore = feed.continuation ?? null;
 		} catch (e) {
 			error = String(e);
 		} finally {
 			moreLoading = false;
 		}
+	}
+
+	function toggleFullscreen() {
+		if (!box) return;
+		if (document.fullscreenElement) void document.exitFullscreen();
+		else void box.requestFullscreen?.().catch(() => {});
+	}
+
+	function handleVideoSurfaceClick(e: MouseEvent) {
+		// Ignore clicks on interactive controls inside AudioModeOverlay if any
+		const target = e.target as HTMLElement | null;
+		if (target?.closest('button, a, input, select')) return;
+		if (clickTimer) clearTimeout(clickTimer);
+		clickTimer = setTimeout(() => {
+			clickTimer = null;
+			void api.togglePause();
+		}, 200);
+	}
+
+	function handleVideoSurfaceDblClick(e: MouseEvent) {
+		const target = e.target as HTMLElement | null;
+		if (target?.closest('button, a, input, select')) return;
+		if (clickTimer) {
+			clearTimeout(clickTimer);
+			clickTimer = null;
+		}
+		toggleFullscreen();
 	}
 
 	async function toggleLike() {
@@ -192,11 +261,16 @@
 	let ro: ResizeObserver | null = null;
 
 	onMount(() => {
+		void api
+			.getPlayCounts()
+			.then((counts) => seedWatchedVideos(Object.keys(counts)))
+			.catch(() => {});
 		ro = new ResizeObserver(measure);
 		document.addEventListener('visibilitychange', measure);
 		document.addEventListener('scroll', measure, true);
 		document.addEventListener('fullscreenchange', measure);
 		return () => {
+			if (clickTimer) clearTimeout(clickTimer);
 			loadSeq++;
 			ro?.disconnect();
 			document.removeEventListener('visibilitychange', measure);
@@ -269,6 +343,7 @@
 		const id = playback.now?.videoId;
 		if (id === videoId) {
 			observedPlaying = true;
+			untrack(() => markVideoWatched(videoId));
 			return;
 		}
 		const row = playback.queue.items[playback.queue.currentIndex];
@@ -280,10 +355,28 @@
 
 <svelte:window
 	onkeydown={(e) => {
+		const target = e.target as HTMLElement | null;
+		if (
+			target &&
+			(target.tagName === 'INPUT' ||
+				target.tagName === 'TEXTAREA' ||
+				target.tagName === 'SELECT' ||
+				target.isContentEditable)
+		) {
+			return;
+		}
 		if (e.key === 'f' && !e.metaKey && !e.ctrlKey && box) {
 			// Fullscreen on the box, not the document: the video is what should fill the screen.
-			if (document.fullscreenElement) void document.exitFullscreen();
-			else void box.requestFullscreen?.().catch(() => {});
+			toggleFullscreen();
+		} else if ((e.key === ' ' || e.key === 'k') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+			e.preventDefault();
+			void api.togglePause();
+		} else if (e.key === 'ArrowLeft' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+			e.preventDefault();
+			void api.seek(Math.max(0, playback.position - 10));
+		} else if (e.key === 'ArrowRight' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+			e.preventDefault();
+			void api.seek(Math.min(playback.duration, playback.position + 10));
 		}
 	}}
 />
@@ -293,17 +386,23 @@
 		<ErrorState message={error} onRetry={load} />
 	{:else if page}
 		<!-- Followed live channels horizontal bar above the video -->
-		{#if twitchSession.status?.signedIn && twitchSession.liveChannels.length > 0}
+		{#if twitchSession.status?.signedIn}
 			<div class="mb-3">
 				<TwitchFollowedBar navigate={true} compact={true} />
 			</div>
 		{/if}
 
-		<!-- The picture, full width, its height capped so the page below it stays on screen. -->
+		<!-- The picture, full width, its height capped so the page below it stays on screen.
+		     Click toggles play/pause; double-click toggles fullscreen. -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="relative w-full overflow-hidden rounded-2xl {audioMode.on ? 'bg-black' : 'bg-transparent'}"
+			class="relative w-full cursor-pointer select-none overflow-hidden rounded-2xl {audioMode.on ? 'bg-black' : 'bg-transparent'}"
 			style="aspect-ratio:16/9;max-height:calc(100vh - 13rem)"
 			bind:this={box}
+			onclick={handleVideoSurfaceClick}
+			ondblclick={handleVideoSurfaceDblClick}
+			title={playback.paused ? 'Click to play · Double-click for fullscreen' : 'Click to pause · Double-click for fullscreen'}
 		>
 			{#if !prefs.nativeVideo && !audioMode.on}
 				<div class="absolute inset-0 bg-black [&_video]:h-full [&_video]:w-full [&_video]:object-contain" bind:this={fallbackBox}></div>
@@ -321,7 +420,7 @@
 			{/if}
 		</div>
 
-		<VideoControls fullscreen={() => { if (box) { if (document.fullscreenElement) void document.exitFullscreen(); else void box.requestFullscreen(); } }} />
+		<VideoControls fullscreen={toggleFullscreen} />
 		<div class="mt-5 flex flex-col gap-6 lg:flex-row">
 			<!-- Left: everything about this video, and what plays after it. -->
 			<div class="min-w-0 flex-1">
@@ -434,7 +533,7 @@
 							{/each}
 						</ul>
 					</section>
-				{:else if page.autoplay}
+				{:else if effectiveAutoplay}
 					<section class="mt-5 rounded-xl bg-foreground/5 p-3">
 						<p class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
 							{t('nav.up_next')}
@@ -442,11 +541,12 @@
 						<button
 							class="mt-1.5 flex w-full cursor-pointer items-center gap-2 text-left text-sm hover:underline"
 							onclick={() =>
-								page && goto(`/video/watch/${encodeURIComponent(page.autoplay!.videoId)}`)}
+								effectiveAutoplay &&
+								goto(`/video/watch/${encodeURIComponent(effectiveAutoplay.videoId)}`)}
 						>
-							<span class="min-w-0 flex-1 truncate">{page.autoplay.title}</span>
-							{#if page.autoplay.channel}
-								<span class="shrink-0 text-xs text-muted-foreground">{page.autoplay.channel}</span>
+							<span class="min-w-0 flex-1 truncate">{effectiveAutoplay.title}</span>
+							{#if effectiveAutoplay.channel}
+								<span class="shrink-0 text-xs text-muted-foreground">{effectiveAutoplay.channel}</span>
 							{/if}
 						</button>
 					</section>
@@ -487,23 +587,58 @@
 				</section>
 			</div>
 
-			<!-- Right: the related rail. -->
+			<!-- Right: the related rail (Full-length videos separated from Shorts). -->
 			<aside class="w-full shrink-0 lg:w-96">
-				<h2 class="mb-2 font-heading text-sm font-semibold tracking-wide text-muted-foreground uppercase">
-					{t('nav.up_next')}
-				</h2>
+				<div class="mb-2 flex items-center justify-between">
+					<h2 class="font-heading text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+						{t('nav.up_next')}
+					</h2>
+					<span class="text-[11px] text-muted-foreground">
+						{separatedRelated.fullItems.length} videos
+					</span>
+				</div>
 				<div class="flex flex-col gap-1">
-					{#each related as item, i (item.kind + i)}
+					{#each separatedRelated.fullItems as item, i (item.kind + ':' + (item.kind === 'video' ? item.videoId : i))}
 						<VideoCardView {item} onopen={openFeedItem} />
 					{/each}
 				</div>
+
+				{#if separatedRelated.shortItems.length > 0}
+					<div class="mt-4 rounded-xl border border-border/60 bg-card/40 p-2.5">
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-2">
+								<span class="inline-flex items-center rounded-md bg-red-500/15 px-2 py-0.5 text-[10px] font-bold tracking-wider text-red-500 uppercase">
+									Shorts
+								</span>
+								<span class="text-xs text-muted-foreground">
+									{separatedRelated.shortItems.length} related shorts
+								</span>
+							</div>
+							<button
+								type="button"
+								class="cursor-pointer text-xs font-medium text-primary hover:underline"
+								onclick={() => (showRelatedShorts = !showRelatedShorts)}
+							>
+								{showRelatedShorts ? 'Hide' : 'Show'}
+							</button>
+						</div>
+						{#if showRelatedShorts}
+							<div class="mt-2.5 grid grid-cols-2 gap-2">
+								{#each separatedRelated.shortItems as item, i (item.kind + ':' + (item.kind === 'video' ? item.videoId : i))}
+									<VideoCardView {item} vertical={true} onopen={openFeedItem} />
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
+
 				{#if relatedMore}
 					<button
-						class="mt-2 w-full cursor-pointer rounded-full bg-foreground/5 px-4 py-2 text-sm hover:bg-foreground/10"
+						class="mt-3 w-full cursor-pointer rounded-full bg-foreground/5 px-4 py-2 text-sm hover:bg-foreground/10 disabled:opacity-50"
 						onclick={loadMoreRelated}
 						disabled={moreLoading}
 					>
-						{t('common.see_all')}
+						{moreLoading ? 'Loading more…' : t('common.see_all')}
 					</button>
 				{/if}
 			</aside>

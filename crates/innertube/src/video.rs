@@ -436,6 +436,12 @@ fn is_live_style(v: &Value) -> bool {
     })
 }
 
+fn is_short_style(v: &Value) -> bool {
+    find_first(v, "reelWatchEndpoint").is_some()
+        || find_all(v, "style").iter().any(|s| s.as_str() == Some("SHORTS"))
+        || find_all(v, "webPageType").iter().any(|s| s.as_str() == Some("WEB_PAGE_TYPE_SHORTS"))
+}
+
 fn video_renderer(r: &Value) -> Option<VideoCard> {
     let video_id = r.get("videoId")?.as_str()?.to_owned();
     let title = text_at(r, "title").or_else(|| text_at(r, "headline")).unwrap_or_default();
@@ -453,6 +459,7 @@ fn video_renderer(r: &Value) -> Option<VideoCard> {
         .get("badges")
         .is_some_and(|b| b.to_string().contains("LIVE"))
         || r.get("thumbnailOverlays").is_some_and(is_live_style);
+    let is_short = !is_live && is_short_style(r);
     Some(VideoCard {
         thumbnail: video_thumb(&video_id),
         channel: byline.and_then(text),
@@ -465,7 +472,7 @@ fn video_renderer(r: &Value) -> Option<VideoCard> {
         views: text_at(r, "shortViewCountText").or_else(|| text_at(r, "viewCountText")),
         published: text_at(r, "publishedTimeText"),
         is_live,
-        is_short: false,
+        is_short,
         index: text_at(r, "index").or_else(|| text_at(r, "indexText")),
         selected: r.get("selected").and_then(Value::as_bool).unwrap_or(false),
         set_video_id: r.get("setVideoId").and_then(Value::as_str).map(str::to_owned),
@@ -544,6 +551,10 @@ fn lockup(r: &Value) -> Option<FeedItem> {
     }
     let is_live = image.is_some_and(is_live_style)
         || badges.iter().any(|b| b.eq_ignore_ascii_case("live"));
+    let is_short = !is_live
+        && (kind.contains("SHORT")
+            || is_short_style(r)
+            || badges.iter().any(|b| b.eq_ignore_ascii_case("shorts")));
     // Row 0 is the channel (absent on a channel's own pages), the last one views · date.
     let (channel, stats) = match rows.len() {
         0 => (None, Vec::new()),
@@ -563,6 +574,7 @@ fn lockup(r: &Value) -> Option<FeedItem> {
         views: stats.first().cloned(),
         published: stats.get(1).cloned(),
         is_live,
+        is_short,
         video_id: content_id,
         title,
         ..Default::default()
@@ -700,11 +712,22 @@ impl Walk {
                                 .pointer("/header/itemSectionHeaderRenderer/title")
                                 .or_else(|| child.get("title"))
                                 .or_else(|| child.pointer("/content/richShelfRenderer/title"))
-                                .and_then(text);
-                            if title.is_some() {
+                                .or_else(|| child.pointer("/content/reelShelfRenderer/title"))
+                                .and_then(text)
+                                .or_else(|| {
+                                    (k == "reelShelfRenderer"
+                                        || child.get("reelShelfRenderer").is_some()
+                                        || find_first(child, "shortsLockupViewModel").is_some())
+                                    .then(|| "Shorts".to_owned())
+                                });
+                            let is_titled = title.is_some();
+                            if is_titled {
                                 self.sections.push(FeedSection { title, items: Vec::new() });
                             }
                             self.walk(child);
+                            if is_titled {
+                                self.sections.push(FeedSection::default());
+                            }
                             continue;
                         }
                         _ => {}

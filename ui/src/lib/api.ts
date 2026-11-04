@@ -1546,3 +1546,34 @@ export interface TwitchBroadcasterProfile {
 
 export const twitchBroadcasterProfile = (login: string) =>
 	invoke<TwitchBroadcasterProfile>('twitch_broadcaster_profile', { login });
+
+export interface TwitchChatMessage {
+	seq: number;
+	id: string;
+	channel: string;
+	username: string;
+	login: string;
+	text: string;
+	color?: string | null;
+	badges: string[];
+	isAction: boolean;
+	timestampMs: number;
+}
+
+export interface TwitchChatSnapshot {
+	channel: string;
+	connected: boolean;
+	latestSeq: number;
+	dropped: number;
+	messages: TwitchChatMessage[];
+}
+
+export const twitchChatConnect = (channel: string) =>
+	invoke<TwitchChatSnapshot>('twitch_chat_connect', { channel });
+export const twitchChatDisconnect = () => invoke<void>('twitch_chat_disconnect');
+export const twitchChatPoll = (sinceSeq?: number) =>
+	invoke<TwitchChatSnapshot>('twitch_chat_poll', { sinceSeq: sinceSeq ?? null });
+export const twitchChatSend = (channel: string, message: string) =>
+	invoke<void>('twitch_chat_send', { channel, message });
+export const onTwitchChatBatch = (cb: (msgs: TwitchChatMessage[]) => void): Promise<UnlistenFn> =>
+	listen<TwitchChatMessage[]>('twitch-chat-batch', (e) => cb(e.payload));

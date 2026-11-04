@@ -2345,7 +2345,7 @@ impl AppState {
                             url,
                             client: data.stream_client.clone(),
                             playlist: None,
-                            cpn: innertube::generate_cpn(),
+                            cpn: q.cpn.clone(),
                             start: seek.unwrap_or(0.0),
                             reported: 0.0,
                         });
@@ -3056,7 +3056,7 @@ impl AppState {
             }
         }
 
-        if !self.history_enabled() || !self.it.is_logged_in() {
+        if !(self.history_enabled() || crate::video_play::history_ping(&self.db)) || !self.it.is_logged_in() {
             return;
         }
         // Say so when there's nothing to ping. This used to be a silent `return`, which is why
@@ -3124,7 +3124,7 @@ impl AppState {
         let mut guard = self.watchtime.lock().ok()?;
         let report = guard.as_mut()?;
         let watched = pos - report.start;
-        if watched - report.reported < 60.0 {
+        if watched - report.reported < if report.reported == 0.0 { 15.0 } else { 60.0 } {
             return None;
         }
         // The ledger moves forward here, under the lock, so if this report fails to send the

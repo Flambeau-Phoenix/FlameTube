@@ -10,11 +10,14 @@
 
 	let {
 		item,
-		onopen
+		onopen,
+		vertical = false
 	}: {
 		item: FeedItem;
 		/** Navigating is the page's business: the card only says what was picked. */
 		onopen: (item: FeedItem) => void;
+		/** Render as a vertical 9:16 card (used in the separated Shorts section). */
+		vertical?: boolean;
 	} = $props();
 
 	let failed = $state(false);
@@ -26,12 +29,13 @@
 	const playlist = $derived(item.kind === 'playlist' ? item : null);
 	const kind = $derived(item.kind);
 	const title = $derived(item.title);
+	const isShortCard = $derived(Boolean(vertical || video?.isShort));
 	// A video card asks i.ytimg.com for the 320x180 frame of the id it was given: YouTube serves
 	// that size for every video, so the feed response need not carry a URL. Channels and
 	// playlists carry their own art.
 	const thumb = $derived(
 		item.kind === 'video'
-			? `https://i.ytimg.com/vi/${item.videoId}/mqdefault.jpg`
+			? `https://i.ytimg.com/vi/${item.videoId}/${isShortCard ? 'hqdefault' : 'mqdefault'}.jpg`
 			: (item.thumbnail ?? null)
 	);
 </script>
@@ -41,9 +45,11 @@
 	onclick={() => onopen(item)}
 >
 	<div
-		class="relative aspect-video w-full overflow-hidden bg-foreground/5 {kind === 'channel'
-			? 'rounded-full'
-			: 'rounded-lg'}"
+		class="relative w-full overflow-hidden bg-foreground/5 {kind === 'channel'
+			? 'aspect-video rounded-full'
+			: isShortCard
+				? 'aspect-[9/16] rounded-xl border border-red-500/20'
+				: 'aspect-video rounded-lg'}"
 	>
 		{#if thumb && !failed}
 			<img
@@ -66,7 +72,7 @@
 				/>
 			</div>
 		{/if}
-		{#if video?.duration}
+		{#if video?.duration && !video?.isShort}
 			<span
 				class="absolute right-1.5 bottom-1.5 rounded bg-black/80 px-1 py-0.5 text-[11px] font-medium text-white"
 				>{video.duration}</span
@@ -80,8 +86,8 @@
 		{/if}
 		{#if video?.isShort}
 			<span
-				class="absolute left-1.5 bottom-1.5 rounded bg-black/70 px-1 py-0.5 text-[10px] font-medium text-white"
-				>Short</span
+				class="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-md bg-red-600/90 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase shadow-xs"
+				>Shorts</span
 			>
 		{/if}
 		{#if playlist?.count}
@@ -102,7 +108,7 @@
 		</span>
 	</div>
 	<div class="flex min-w-0 gap-2 px-0.5">
-		{#if video?.channelThumbnail}
+		{#if video?.channelThumbnail && !isShortCard}
 			<img
 				src={video.channelThumbnail}
 				alt=""

@@ -682,8 +682,360 @@ pub async fn twitch_broadcaster_profile(
     })
 }
 
+
+// --- Native Twitch IRC Chat (twitch-irc + tokio + Threaded Ring-Buffer Queue) ---------------
+
+use std::collections::VecDeque;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{self, Receiver, Sender};
+use tauri::Emitter;
+use twitch_irc::login::StaticLoginCredentials;
+use twitch_irc::message::ServerMessage;
+use twitch_irc::{ClientConfig, SecureTCPTransport, TwitchIRCClient};
+
+/// Maximum chat messages retained in the ring buffer per active channel.
+const CHAT_RING_CAPACITY: usize = 500;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppChatMessage {
+    pub seq: u64,
+    pub id: String,
+    pub channel: String,
+    pub username: String,
+    pub login: String,
+    pub text: String,
+    pub color: Option<String>,
+    pub badges: Vec<String>,
+    pub is_action: bool,
+    pub timestamp_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSnapshot {
+    pub channel: String,
+    pub connected: bool,
+    pub latest_seq: u64,
+    pub dropped: u64,
+    pub messages: Vec<AppChatMessage>,
+}
+
+/// Thread-safe bounded ring-buffer queue for high-volume Twitch chat streams.
+/// Evicts the oldest message in O(1) when full so raids or tournament chats never bloat memory.
+pub struct ChatRingBuffer {
+    channel: String,
+    buf: VecDeque<AppChatMessage>,
+    capacity: usize,
+    next_seq: u64,
+    dropped: u64,
+    connected: bool,
+}
+
+impl ChatRingBuffer {
+    pub fn new(channel: &str, capacity: usize) -> Self {
+        let cap = capacity.max(1);
+        Self {
+            channel: channel.to_owned(),
+            buf: VecDeque::with_capacity(cap),
+            capacity: cap,
+            next_seq: 0,
+            dropped: 0,
+            connected: false,
+        }
+    }
+
+    pub fn push(&mut self, mut msg: AppChatMessage) -> AppChatMessage {
+        self.next_seq += 1;
+        msg.seq = self.next_seq;
+        if self.buf.len() >= self.capacity {
+            self.buf.pop_front();
+            self.dropped += 1;
+        }
+        self.buf.push_back(msg.clone());
+        msg
+    }
+
+    pub fn messages_since(&self, since_seq: u64) -> Vec<AppChatMessage> {
+        self.buf
+            .iter()
+            .filter(|m| m.seq > since_seq)
+            .cloned()
+            .collect()
+    }
+
+    pub fn snapshot(&self, since_seq: u64) -> ChatSnapshot {
+        ChatSnapshot {
+            channel: self.channel.clone(),
+            connected: self.connected,
+            latest_seq: self.next_seq,
+            dropped: self.dropped,
+            messages: self.messages_since(since_seq),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    #[cfg(test)]
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+}
+
+pub struct TwitchManager {
+    pub channel: String,
+    pub client: TwitchIRCClient<SecureTCPTransport, StaticLoginCredentials>,
+    pub rx: Mutex<Option<Receiver<AppChatMessage>>>,
+    pub ring: Arc<Mutex<ChatRingBuffer>>,
+    pub shutdown: Arc<AtomicBool>,
+}
+
+impl TwitchManager {
+    pub fn new(channel: &str, app: Option<tauri::AppHandle>) -> Self {
+        let clean = channel.trim().trim_start_matches('#').to_lowercase();
+        let config = ClientConfig::default();
+        let (mut incoming_messages, client) =
+            TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);
+        let (tx, rx): (Sender<AppChatMessage>, Receiver<AppChatMessage>) = mpsc::channel();
+        let ring = Arc::new(Mutex::new(ChatRingBuffer::new(&clean, CHAT_RING_CAPACITY)));
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let client_clone = client.clone();
+        let join_channel = clean.clone();
+        let shutdown_irc = shutdown.clone();
+        let ring_irc = ring.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = client_clone.join(join_channel.clone()) {
+                tracing::warn!(channel = %join_channel, error = %e, "twitch irc join failed");
+                return;
+            }
+            if let Ok(mut guard) = ring_irc.lock() {
+                guard.connected = true;
+            }
+            while let Some(message) = incoming_messages.recv().await {
+                if shutdown_irc.load(Ordering::Relaxed) {
+                    break;
+                }
+                match message {
+                    ServerMessage::Privmsg(msg) => {
+                        let chat_msg = AppChatMessage {
+                            seq: 0,
+                            id: msg.message_id,
+                            channel: msg.channel_login,
+                            username: msg.sender.name,
+                            login: msg.sender.login,
+                            text: msg.message_text,
+                            color: msg.name_color.map(|c| c.to_string()),
+                            badges: msg.badges.into_iter().map(|b| b.name).collect(),
+                            is_action: msg.is_action,
+                            timestamp_ms: msg.server_timestamp.timestamp_millis(),
+                        };
+                        if tx.send(chat_msg).is_err() {
+                            break;
+                        }
+                    }
+                    ServerMessage::Join(_) => {
+                        if let Ok(mut guard) = ring_irc.lock() {
+                            guard.connected = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Ok(mut guard) = ring_irc.lock() {
+                guard.connected = false;
+            }
+        });
+
+        let mgr = Self {
+            channel: clean,
+            client,
+            rx: Mutex::new(Some(rx)),
+            ring: ring.clone(),
+            shutdown: shutdown.clone(),
+        };
+        mgr.spawn_ring_consumer(app);
+        mgr
+    }
+
+    /// Background thread that drains the mpsc `Receiver<AppChatMessage>` into the bounded
+    /// `ChatRingBuffer` and emits batched updates to the Tauri UI loop (~12 Hz max) to prevent
+    /// main-thread/IPC flooding during high-volume chat bursts.
+    fn spawn_ring_consumer(&self, app: Option<tauri::AppHandle>) {
+        let Some(rx) = self.rx.lock().unwrap().take() else { return };
+        let ring = self.ring.clone();
+        let shutdown = self.shutdown.clone();
+        std::thread::spawn(move || {
+            let mut batch: Vec<AppChatMessage> = Vec::new();
+            let mut last_emit = std::time::Instant::now();
+            loop {
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                match rx.recv_timeout(Duration::from_millis(80)) {
+                    Ok(msg) => {
+                        if let Ok(mut guard) = ring.lock() {
+                            batch.push(guard.push(msg));
+                        }
+                        while batch.len() < 64 {
+                            match rx.try_recv() {
+                                Ok(next_msg) => {
+                                    if let Ok(mut guard) = ring.lock() {
+                                        batch.push(guard.push(next_msg));
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        if last_emit.elapsed() >= Duration::from_millis(80) || batch.len() >= 32 {
+                            if let Some(ref handle) = app {
+                                let _ = handle.emit("twitch-chat-batch", &batch);
+                            }
+                            batch.clear();
+                            last_emit = std::time::Instant::now();
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if !batch.is_empty() {
+                            if let Some(ref handle) = app {
+                                let _ = handle.emit("twitch-chat-batch", &batch);
+                            }
+                            batch.clear();
+                            last_emit = std::time::Instant::now();
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        if !batch.is_empty() {
+                            if let Some(ref handle) = app {
+                                let _ = handle.emit("twitch-chat-batch", &batch);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn stop(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        let _ = self.client.part(self.channel.clone());
+    }
+}
+
+impl Drop for TwitchManager {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn active_chat() -> &'static Mutex<Option<Arc<TwitchManager>>> {
+    static CHAT: OnceLock<Mutex<Option<Arc<TwitchManager>>>> = OnceLock::new();
+    CHAT.get_or_init(|| Mutex::new(None))
+}
+
+#[tauri::command]
+pub async fn twitch_chat_connect(
+    app: tauri::AppHandle,
+    channel: String,
+) -> Result<ChatSnapshot, String> {
+    let clean = channel.trim().trim_start_matches('#').to_lowercase();
+    if clean.is_empty() || clean.len() > 25 || !clean.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err("Invalid Twitch channel login".to_owned());
+    }
+    let mut guard = active_chat().lock().unwrap();
+    if let Some(existing) = guard.as_ref() {
+        if existing.channel == clean && !existing.shutdown.load(Ordering::Relaxed) {
+            let ring = existing.ring.lock().unwrap();
+            return Ok(ring.snapshot(0));
+        }
+        existing.stop();
+    }
+    let mgr = Arc::new(TwitchManager::new(&clean, Some(app)));
+    let snapshot = mgr.ring.lock().unwrap().snapshot(0);
+    *guard = Some(mgr);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub fn twitch_chat_disconnect() {
+    let mut guard = active_chat().lock().unwrap();
+    if let Some(existing) = guard.take() {
+        existing.stop();
+    }
+}
+
+#[tauri::command]
+pub fn twitch_chat_poll(since_seq: Option<u64>) -> Result<ChatSnapshot, String> {
+    let guard = active_chat().lock().unwrap();
+    let Some(mgr) = guard.as_ref() else {
+        return Ok(ChatSnapshot {
+            channel: String::new(),
+            connected: false,
+            latest_seq: 0,
+            dropped: 0,
+            messages: Vec::new(),
+        });
+    };
+    let ring = mgr.ring.lock().unwrap();
+    Ok(ring.snapshot(since_seq.unwrap_or(0)))
+}
+
+#[tauri::command]
+pub async fn twitch_chat_send(
+    channel: String,
+    message: String,
+) -> Result<(), String> {
+    let clean = channel.trim().trim_start_matches('#').to_lowercase();
+    let text = message.trim().to_owned();
+    if text.is_empty() {
+        return Ok(());
+    }
+    let mgr = {
+        let guard = active_chat().lock().unwrap();
+        guard.clone().ok_or_else(|| "Twitch chat is not connected".to_owned())?
+    };
+    mgr.client
+        .say(clean, text)
+        .await
+        .map_err(|e| format!("Could not send chat message (anonymous connection is read-only): {e}"))
+}
+
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chat_ring_buffer_evicts_oldest_and_tracks_sequence() {
+        let mut ring = super::ChatRingBuffer::new("shroud", 3);
+        for i in 1..=5 {
+            ring.push(super::AppChatMessage {
+                seq: 0,
+                id: format!("msg-{i}"),
+                channel: "shroud".to_owned(),
+                username: format!("User{i}"),
+                login: format!("user{i}"),
+                text: format!("Hello {i}"),
+                color: Some("#9146FF".to_owned()),
+                badges: vec!["subscriber".to_owned()],
+                is_action: false,
+                timestamp_ms: i as i64 * 1000,
+            });
+        }
+        assert_eq!(ring.len(), 3);
+        assert_eq!(ring.dropped(), 2);
+        let all = ring.messages_since(0);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].seq, 3);
+        assert_eq!(all[2].seq, 5);
+        let recent = ring.messages_since(3);
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].id, "msg-4");
+        assert_eq!(recent[1].id, "msg-5");
+    }
     use super::*;
     use serde_json::json;
 
